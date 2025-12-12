@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+jinja2
+chromadb
+sentence-transformers
+ijson
+openai-whisper
+gTTS
+sounddevice
+scipy
+numpy
+pydub
