@@ -12,7 +12,6 @@ class LLMEvaluator:
         self.model = "llama-3.3-70b-versatile"
 
     def _chat(self, prompt, system_role="Kamu adalah HRD Interviewer Profesional & Analis Ahli."):
-        """Fungsi helper untuk mengirim request ke Groq"""
         try:
             completion = self.client.chat.completions.create(
                 messages=[
@@ -20,7 +19,7 @@ class LLMEvaluator:
                     {"role": "user", "content": prompt}
                 ],
                 model=self.model,
-                temperature=0.6,
+                temperature=0.7, # Sedikit kreatif untuk bridging natural
                 max_tokens=3000 
             )
             return completion.choices[0].message.content.strip()
@@ -28,13 +27,10 @@ class LLMEvaluator:
             return f"Error LLM: {e}"
 
     # =========================================================================
-    # 1. FASE GENERATOR PERTANYAAN (MULUT HRD)
+    # 1. GENERATOR PERTANYAAN
     # =========================================================================
 
     def generate_opening(self, user_name, job_role, time_context="Selamat Pagi"):
-        """
-        Membuat pembukaan interview yang sadar waktu.
-        """
         prompt = f"""
         Nama Kandidat: {user_name}
         Posisi Dilamar: {job_role}
@@ -50,60 +46,106 @@ class LLMEvaluator:
         """
         return self._chat(prompt)
 
-    def paraphrase_question(self, question, job_role="Kandidat"):
-        """
-        Mengubah pertanyaan kaku menjadi natural.
-        Aturan: Maksimal 30 kata.
-        """
+    def paraphrase_question(self, question, job_role="Kandidat", prev_answer=None):
+        # Logika Bridging: Respons dulu jawaban sebelumnya
+        bridge_instruction = ""
+        if prev_answer:
+            bridge_instruction = f"""
+            Konteks Jawaban Terakhir Kandidat: "{prev_answer}"
+            Instruksi Tambahan: Mulailah dengan 1 kalimat pendek yang merespons/mengapresiasi jawaban terakhir kandidat secara natural (misal: "Menarik sekali.", "Poin yang bagus.", "Saya mengerti pendekatannya."), BARU kemudian ajukan pertanyaan target.
+            """
+        
         prompt = f"""
         Konteks Peran: {job_role}
-        Pertanyaan Asli: "{question}"
+        Pertanyaan Baru Target: "{question}"
+        {bridge_instruction}
         
-        Tugas: Ubah pertanyaan di atas menjadi gaya bahasa lisan interview yang natural.
+        Tugas: Sampaikan pertanyaan target dengan gaya lisan natural Indonesia.
         Panduan:
         - Pertahankan nada profesional namun tidak kaku.
         - Gunakan pertanyaan terbuka (open-ended).
-        - WAJIB: Pertanyaan harus DI BAWAH 30 KATA.
+        - WAJIB: Pertanyaan harus DI BAWAH 45 KATA (Termasuk respons awal jika ada).
         - Bahasa: Bahasa Indonesia.
         
-        Output: HANYA kalimat tanyanya saja.
+        Output: HANYA kalimat HRD yang akan diucapkan.
         """
         return self._chat(prompt)
 
-    def generate_technical_question_combo(self, job_desc, history_q, job_role):
-        """
-        Membangkitkan pertanyaan teknis (Kombo).
-        Fokus: Pengalaman Proyek Nyata (Hands-on).
-        """
+    # --- VARIASI 1: COMBO (PROYEK GABUNGAN) ---
+    def generate_technical_question_combo(self, job_desc, history_q, job_role, prev_answer=None):
+        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+
         prompt = f"""
         Kamu adalah Interviewer Teknis yang spesialis untuk posisi {job_role}.
-        
-        Konteks:
-        - Deskripsi Pekerjaan (JD): "{job_desc[:1500]}"
-        - Pertanyaan Sebelumnya: {history_q}
+        Konteks JD: "{job_desc[:1500]}"
+        History Pertanyaan: {history_q}
+        {bridge_instruction}
 
         Tugas: Buat SATU "Pertanyaan Teknis Kombo".
         
-        Ikuti panduan detail ini:
-        1. Pindai JD untuk menemukan skill teknis utama (misal: SQL + Python + Tableau).
-        2. Buat satu "Studi Kasus/Skenario" spesifik yang memaksa kandidat menjelaskan bagaimana mereka menggunakan skill-skill tersebut secara bersamaan.
-        3. FOKUS: Galilah pengalaman proyek nyata (Hands-on), bukan sekadar definisi teori.
-        4. WAJIB: Pertanyaan harus DI BAWAH 40 KATA. Langsung pada inti masalah.
+        Panduan Detail:
+        1. Pindai JD untuk menemukan 2-3 skill teknis utama.
+        2. Buat satu "Studi Kasus/Skenario" spesifik yang memaksa kandidat menjelaskan bagaimana mereka menggunakan skill-skill tersebut secara bersamaan dalam PROYEK NYATA.
+        3. FOKUS: Galilah pengalaman Hands-on, bukan sekadar definisi teori.
+        4. Cek History: JANGAN tanyakan skill yang sudah pernah ditanyakan sebelumnya.
+        5. WAJIB: Pertanyaan harus DI BAWAH 50 KATA (Termasuk respons awal).
+        6. Bahasa: Bahasa Indonesia.
+
+        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
+        """
+        return self._chat(prompt)
+
+    # --- VARIASI 2: CONCEPT (TEORI MENDALAM) ---
+    def generate_technical_concept(self, job_desc, history_q, job_role, prev_answer=None):
+        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+
+        prompt = f"""
+        Kamu adalah Interviewer Teknis.
+        Konteks JD: "{job_desc[:1500]}"
+        History Pertanyaan: {history_q}
+        {bridge_instruction}
+
+        Tugas: Buat SATU "Pertanyaan Konseptual/Deep Dive".
+        
+        Panduan Detail:
+        1. Cari skill di JD yang BELUM sering dibahas di History Pertanyaan.
+        2. Minta kandidat menjelaskan 'Cara Kerja', 'Best Practice', atau 'Perbedaan' dari teknologi tersebut.
+        3. Tujuannya menguji pemahaman teoritis yang mendalam.
+        4. WAJIB: Pertanyaan harus DI BAWAH 40 KATA (Termasuk respons awal).
         5. Bahasa: Bahasa Indonesia.
 
-        Output: HANYA kalimat pertanyaannya saja.
+        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
+        """
+        return self._chat(prompt)
+
+    # --- VARIASI 3: CASE (STUDI KASUS ERROR) ---
+    def generate_technical_case(self, job_desc, history_q, job_role, prev_answer=None):
+        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+
+        prompt = f"""
+        Kamu adalah User/Lead Teknis.
+        Konteks JD: "{job_desc[:1500]}"
+        History Pertanyaan: {history_q}
+        {bridge_instruction}
+
+        Tugas: Buat SATU "Studi Kasus Masalah (Troubleshooting)".
+        
+        Panduan Detail:
+        1. Berikan situasi singkat tentang masalah teknis/error/bug yang relevan dengan JD.
+        2. Tanyakan langkah solutif apa yang akan diambil kandidat.
+        3. Contoh: "Jika query SQL lambat saat data membesar, apa langkah optimasi Anda?"
+        4. WAJIB: Pertanyaan harus DI BAWAH 50 KATA (Termasuk respons awal).
+        5. Bahasa: Bahasa Indonesia.
+
+        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
         """
         return self._chat(prompt)
 
     # =========================================================================
-    # 2. FASE FOLLOW-UP (TELINGA HRD)
+    # 2. FASE FOLLOW-UP
     # =========================================================================
 
     def check_response_and_followup(self, question, user_answer, ideal_answer):
-        """
-        Mengecek jawaban user.
-        Persona: Ahli penggali insight mendalam.
-        """
         prompt = f"""
         Kamu adalah ahli dalam membuat pertanyaan tindak lanjut (follow-up) untuk menggali wawasan lebih dalam.
         
@@ -115,28 +157,55 @@ class LLMEvaluator:
         1. Apakah jawaban tersebut menunjukkan "Pengalaman Nyata/Praktek" atau hanya sekadar teori/hafalan?
         2. Apakah jawabannya terlalu singkat atau tidak jelas?
         
-        Logika Keputusan:
-        - JIKA jawaban sudah cukup/bagus/ada bukti pengalaman -> Output persis: "[NEXT]"
-        - JIKA jawaban tidak jelas/hanya teori/kurang detail -> Buat 1 pertanyaan follow-up singkat untuk meminta CONTOH SPESIFIK atau BUKTI NYATA.
-        
-        Bahasa Follow-up: Bahasa Indonesia.
+        CONSTRAINT KERAS (JANGAN DILANGGAR):
+        - JANGAN PERNAH menyertakan teks analisis atau intro seperti "Berdasarkan jawaban kandidat...".
+        - JANGAN ada "internal monologue".
+        - Output HANYA SATU hal:
+            a) Teks "[NEXT]" jika jawaban sudah bagus.
+            b) Kalimat pertanyaan follow-up (Bahasa Indonesia) jika jawaban kurang.
         """
         return self._chat(prompt)
+
+    # =========================================================================
+    # 3. CLOSING INTENT
+    # =========================================================================
+
+    def analyze_closing_intent(self, user_input):
+        prompt = f"""
+        Tugas: Analisis kalimat kandidat di sesi akhir interview.
+        Kalimat Kandidat: "{user_input}"
+        
+        Tentukan INTENSI kandidat:
+        1. Jika kandidat mengajukan pertanyaan atau minta penjelasan -> Output: "ASK"
+        2. Jika kandidat bilang cukup, tidak ada, sudah jelas, atau terima kasih saja -> Output: "NO"
+        
+        Contoh:
+        - "Apa ada lembur?" -> ASK
+        - "Tidak ada pertanyaan." -> NO
+        - "Cukup jelas bu." -> NO
+        - "Sebenarnya saya ingin tahu soal gaji." -> ASK
+        - "Apakah tidak ada WFH?" -> ASK (Walau ada kata 'tidak', ini pertanyaan)
+        
+        Output HANYA satu kata: ASK atau NO.
+        """
+        try:
+            completion = self.client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model, temperature=0.1, max_tokens=5 
+            )
+            return completion.choices[0].message.content.strip().upper()
+        except:
+            return "NO"
 
     def answer_user_question(self, user_question):
         return self._chat(f"Jawab pertanyaan kandidat ini secara singkat, positif, dan profesional (Bahasa Indonesia): '{user_question}'")
 
     # =========================================================================
-    # 3. FASE FINAL REPORT (RAPOR AKHIR)
+    # 4. FINAL REPORT
     # =========================================================================
 
     def generate_final_report(self, user_name, job_role, job_desc, full_transcript):
-        """
-        FUSION TOTAL PROMPT (VERSI BAHASA INDONESIA).
-        Menggabungkan: 12 Faktor Analisis, Skor Komunikasi, Kutipan Bukti, & Insight Eksekutif.
-        """
-        
-        # 1. Definisi Rubrik Komunikasi (Diterjemahkan)
+        # RUBRIK LENGKAP DARI STANDAR IELTS
         rubric = """
         SISTEM PENILAIAN KOMUNIKASI (Skala 0-10):
         - 10: Penguasaan penuh, penggunaan bahasa sangat tepat, akurat, lancar, menunjukkan pemahaman total.
@@ -151,7 +220,7 @@ class LLMEvaluator:
         - 01: Tidak menjawab.
         """
 
-        # 2. Definisi 12 Faktor Analisis (Diterjemahkan)
+        # 12 FAKTOR ANALISIS
         factors = """
         FAKTOR ANALISIS YANG HARUS DINILAI:
         1. Skill Komunikasi (Tata bahasa, kosa kata, kejelasan)
@@ -168,10 +237,8 @@ class LLMEvaluator:
         12. Adaptabilitas (Menangani pertanyaan sulit)
         """
 
-        # 3. Prompt Utama
         prompt = f"""
         Kamu adalah Evaluator Interview & Analis Ahli.
-        
         KANDIDAT: {user_name}
         POSISI DILAMAR: {job_role}
         
@@ -228,7 +295,7 @@ class LLMEvaluator:
         * **Analisis:** (Jelaskan kenapa kutipan ini menunjukkan kekurangan/keraguan).
 
         ## 5. ✅ CHECKLIST TEKNIS (VALIDASI JD)
-        *Cek apakah hard skill yang diminta di JD muncul dalam jawaban kandidat.*
+        *Cari skill HARD SKILL di JD, cek apakah muncul di jawaban.*
         * [ ] (Skill 1) - (Muncul/Tidak Muncul)
         * [ ] (Skill 2) - (Muncul/Tidak Muncul)
 
