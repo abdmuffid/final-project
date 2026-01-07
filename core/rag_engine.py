@@ -5,15 +5,14 @@ import random
 
 # --- CONFIG PATH ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(CURRENT_DIR) 
-DB_PATH = os.path.join(BASE_DIR, "dataset", "chroma_db") 
+BASE_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR)) 
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset", "chroma_db")
 
 COLLECTION_NAME = "interview_simulation"
 
 class RAGEngine:
     def __init__(self):
         self.collection = None
-        self.asked_ids = set() 
         
         if not os.path.exists(DB_PATH):
             print(f"⚠️ Warning: Database tidak ditemukan di {DB_PATH}")
@@ -34,7 +33,6 @@ class RAGEngine:
 
     def _fetch_candidates(self, where_filter, limit=50):
         try:
-            # Menggunakan .get() murni (Metadata Filter Only) -> Cepat & Hemat Resource
             results = self.collection.get(
                 where=where_filter,
                 limit=limit,
@@ -44,23 +42,19 @@ class RAGEngine:
         except Exception:
             return None
 
-    def get_question(self, stage, sub_category=None):
+    def get_question(self, stage, sub_category=None, excluded_ids=None):
         """
-        Mengambil 1 pertanyaan unik.
-        Menggunakan Logic $and Eksplisit untuk menghindari error ChromaDB.
+        Stateless: Menerima 'excluded_ids' (daftar ID yang sudah ditanyakan ke user ini) dari luar.
         """
         if not self.collection: return None
+        if excluded_ids is None: excluded_ids = []
 
         candidates = []
         
         # --- LOGIC FILTER STRICT ($and) ---
         where_filter = {}
-        
-        # Kasus 1: Cuma Stage
         if not sub_category or sub_category in ["General", "Random"]:
             where_filter = {"stage": stage}
-        
-        # Kasus 2: Stage DAN Sub-Category (Wajib pakai operator $and)
         else:
             where_filter = {
                 "$and": [
@@ -74,7 +68,7 @@ class RAGEngine:
         
         if raw_data and raw_data['ids']:
             for i, doc_id in enumerate(raw_data['ids']):
-                if doc_id in self.asked_ids: continue
+                if doc_id in excluded_ids: continue # Skip kalau sudah ditanya
                 
                 meta = raw_data['metadatas'][i]
                 q_text = meta.get('original_q') or meta.get('question') or raw_data['documents'][i]
@@ -88,15 +82,14 @@ class RAGEngine:
                     "source": "RAG Strict"
                 })
 
-        # 2. FALLBACK (Jika Stok Habis / Kosong)
+        # 2. FALLBACK (Jika Stok Habis, cari random di stage yang sama)
         if not candidates and sub_category != "General":
-            # Cari random di Stage yang sama (Broad -> Broad Random)
             fallback_filter = {"stage": stage}
             raw_fallback = self._fetch_candidates(fallback_filter, limit=50)
             
             if raw_fallback and raw_fallback['ids']:
                 for i, doc_id in enumerate(raw_fallback['ids']):
-                    if doc_id in self.asked_ids: continue
+                    if doc_id in excluded_ids: continue
                     meta = raw_fallback['metadatas'][i]
                     q_text = meta.get('original_q') or raw_fallback['documents'][i]
                     candidates.append({
@@ -109,8 +102,6 @@ class RAGEngine:
 
         # 3. SELECT RANDOM
         if candidates:
-            selected = random.choice(candidates)
-            self.asked_ids.add(selected['id'])
-            return selected
+            return random.choice(candidates)
         else:
             return None

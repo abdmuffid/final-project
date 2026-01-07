@@ -4,3 +4,5 @@ __pycache__/
 chroma_db/
 .ipynb_checkpoints/
 .DS_Store
+llm_evaluation.ipynb
+flask_session/

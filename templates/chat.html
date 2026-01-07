@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Session</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="d-flex flex-column vh-100 bg-chat">
+    
+    <div class="bg-white border-bottom p-3 d-flex justify-content-between align-items-center shadow-sm sticky-top">
+        <div>
+            <h5 class="m-0 fw-bold text-primary">{{ role }}</h5>
+            <small class="text-muted">Kandidat: {{ name }}</small>
+        </div>
+        
+        <div class="d-flex align-items-center gap-2">
+            <div id="statusIndicator" class="badge bg-secondary">Persiapan...</div>
+            <button onclick="forceFinish()" class="btn btn-sm btn-danger text-white shadow-sm fw-bold" title="Hentikan interview dan lihat laporan">
+                ⏹ Akhiri Sesi
+            </button>
+        </div>
+    </div>
+
+    <div id="chatBox" class="flex-grow-1 p-3 overflow-auto">
+        </div>
+
+    <div id="feedbackArea" class="px-3"></div>
+
+    <div class="p-3 bg-white border-top">
+        <div class="input-group">
+            <input type="text" id="userInput" class="form-control" placeholder="Ketik jawaban Anda..." autocomplete="off">
+            <button class="btn btn-primary" id="sendBtn">➤ Kirim</button>
+        </div>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chatBox');
+        
+        // Fungsi Menampilkan Pesan ke Layar
+        function appendMessage(text, sender, isSystem=false) {
+            const div = document.createElement('div');
+            div.className = `d-flex mb-3 ${sender === 'user' ? 'justify-content-end' : 'justify-content-start'}`;
+            
+            const bubble = document.createElement('div');
+            // Styling Bubble: User (Biru), Bot (Putih), System (Kuning Kecil)
+            if (isSystem) {
+                div.className = "d-flex justify-content-center mb-3";
+                bubble.className = "bg-warning-subtle text-dark small px-4 py-2 rounded-pill border border-warning";
+                bubble.innerHTML = `⚙️ ${text}`;
+            } else {
+                bubble.className = `p-3 rounded-3 shadow-sm ${sender === 'user' ? 'bg-primary text-white bubble-user' : 'bg-white text-dark bubble-bot border'}`;
+                bubble.style.maxWidth = "75%";
+                // Render Markdown (Bold, List, dll)
+                bubble.innerHTML = marked.parse(text);
+            }
+            
+            div.appendChild(bubble);
+            chatBox.appendChild(div);
+            // Auto Scroll ke bawah
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Indikator "HRD sedang mengetik..."
+        function showTyping() {
+            const id = 'typingIndicator';
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'd-flex mb-3 justify-content-start';
+            div.innerHTML = `<div class="bg-white p-3 rounded-3 shadow-sm text-muted fst-italic border">HRD sedang mengetik...</div>`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function removeTyping() {
+            const el = document.getElementById('typingIndicator');
+            if(el) el.remove();
+        }
+
+        // LOGIKA UTAMA: Kirim & Terima Data dari Server
+        async function processStep(userMessage = null) {
+            if (!userMessage) showTyping();
+
+            try {
+                const res = await fetch('/api/next_step', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ message: userMessage })
+                });
+                
+                const data = await res.json();
+                removeTyping();
+
+                // 1. Cek Selesai
+                if (data.type === 'finish') {
+                    window.location.href = '/report';
+                    return;
+                }
+
+                // 2. Tampilkan Feedback Real-time (Skor & Hint)
+                if (data.feedback) {
+                    const score = data.feedback.score;
+                    let icon = "💭"; // Default icon
+                    let badgeColor = "bg-secondary";
+
+                    if(score >= 8) { icon = "🌟"; badgeColor = "bg-success"; }
+                    else if(score >= 6) { icon = "👍"; badgeColor = "bg-primary"; }
+                    else { icon = "⚠️"; badgeColor = "bg-warning text-dark"; }
+                    
+                    // Tampilkan Skor
+                    const feedbackHTML = `
+                        <div class="d-flex justify-content-center mb-2 animate-fade">
+                            <span class="badge ${badgeColor} p-2">${icon} Quality Score: ${score}/10</span>
+                        </div>`;
+                    chatBox.insertAdjacentHTML('beforeend', feedbackHTML);
+                    
+                    // Tampilkan HINT (Saran Coach) jika ada
+                    if (data.feedback.hint) {
+                        const hintHTML = `
+                            <div class="d-flex justify-content-center mb-3">
+                                <div class="badge bg-info-subtle text-dark text-wrap p-2 border border-info" style="max-width: 80%;">
+                                    💡 Coach Hint: ${data.feedback.hint}
+                                </div>
+                            </div>`;
+                        chatBox.insertAdjacentHTML('beforeend', hintHTML);
+                    }
+                }
+
+                // 3. Tampilkan Pesan Pertanyaan dari HRD
+                if (data.message) {
+                    appendMessage(data.message, 'bot');
+                    
+                    // Update Status di Header (Level Difficulty)
+                    const statusEl = document.getElementById('statusIndicator');
+                    if (data.difficulty) {
+                        statusEl.textContent = `Level: ${data.difficulty}`;
+                        // Ganti warna badge sesuai kesulitan
+                        statusEl.className = `badge ${data.difficulty === 'HARD' ? 'bg-danger' : data.difficulty === 'MEDIUM' ? 'bg-warning text-dark' : 'bg-success'}`;
+                    } else {
+                        statusEl.textContent = "Interview";
+                        statusEl.className = "badge bg-secondary";
+                    }
+                    
+                    // 4. Auto-Next untuk pesan Info (seperti Closing statement)
+                    if (data.is_info) {
+                        // Tunggu 2.5 detik biar user baca dulu, lalu trigger next step otomatis
+                        setTimeout(() => processStep(null), 2500); 
+                    }
+                }
+
+            } catch (err) {
+                console.error("Error:", err);
+                appendMessage("Maaf, terjadi kesalahan koneksi. Silakan refresh.", 'bot', true);
+            }
+        }
+
+        // Event Listeners (Tombol Kirim & Enter)
+        document.getElementById('sendBtn').addEventListener('click', () => handleSend());
+        document.getElementById('userInput').addEventListener('keypress', (e) => {
+            if(e.key === 'Enter') handleSend();
+        });
+
+        function handleSend() {
+            const input = document.getElementById('userInput');
+            const txt = input.value.trim();
+            if(!txt) return;
+            
+            // Tampilkan pesan user
+            appendMessage(txt, 'user');
+            input.value = '';
+            
+            // Kirim ke backend
+            processStep(txt);
+        }
+
+        // === FUNGSI AKHIRI SESI (TOMBOL MERAH) ===
+        function forceFinish() {
+            if (confirm("Yakin mau menyudahi interview ini? Laporan akan dibuat berdasarkan jawaban yang sudah ada.")) {
+                // Redirect langsung ke halaman laporan
+                window.location.href = '/report';
+            }
+        }
+
+        // Mulai Pertanyaan Pertama saat halaman dimuat
+        window.onload = () => processStep(null);
+    </script>
+</body>
+</html>

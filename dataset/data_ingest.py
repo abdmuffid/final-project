@@ -98,7 +98,7 @@ def ingest_all(df, collection):
             "sub_category": sub_cat,
             "intent":       str(row.get("Intent", "General")),
             "source":       str(row.get("Source", "Manual")),
-            "answer":       a[:2000],
+            "answer":       a, #[:2000],
             "original_q":   q
         }
         

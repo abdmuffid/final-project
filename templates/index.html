@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Interview - Data Series</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="card shadow-lg p-4 mx-auto" style="max-width: 600px;">
+            <div class="text-center mb-4">
+                <h2 class="fw-bold text-primary">📊 AI Interview</h2>
+                <p class="text-muted">Interview Simulation based on RAG.</p>
+            </div>
+            
+            <form id="setupForm">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Nama Lengkap</label>
+                    <input type="text" id="name" class="form-control" placeholder="Contoh: Budi" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Posisi Data yang Dilamar</label>
+                    <select id="role" class="form-select" onchange="checkRole()">
+                        <option value="Data Analyst">Data Analyst</option>
+                        <option value="Data Scientist">Data Scientist</option>
+                        <option value="Data Engineer">Data Engineer</option>
+                        <option value="Machine Learning Engineer">Machine Learning Engineer</option>
+                        <option value="Business Intelligence (BI) Analyst">BI Analyst</option>
+                        <option value="AI Engineer">AI Engineer</option>
+                        <option value="Other">Lainnya (Spesifik Data)...</option>
+                    </select>
+                    <input type="text" id="customRole" class="form-control mt-2 d-none" placeholder="Contoh: Database Administrator...">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Job Description</label>
+                    <textarea id="jd" class="form-control" rows="5" placeholder="Salin kualifikasi dan deskripsi pekerjaan di sini..." required></textarea>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="btnStart">MULAI SIMULASI</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Logika agar kalau pilih 'Lainnya', muncul kotak isian manual
+        function checkRole() {
+            const val = document.getElementById('role').value;
+            const custom = document.getElementById('customRole');
+            if(val === 'Other') { 
+                custom.classList.remove('d-none'); 
+                custom.required = true; 
+            } else { 
+                custom.classList.add('d-none'); 
+                custom.required = false; 
+            }
+        }
+
+        document.getElementById('setupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btnStart');
+            btn.innerHTML = 'Sedang Mempersiapkan...'; btn.disabled = true;
+
+            const roleVal = document.getElementById('role').value;
+            // Ambil value custom jika pilih 'Other'
+            const finalRole = roleVal === 'Other' ? document.getElementById('customRole').value : roleVal;
+
+            // Kirim ke Backend
+            const res = await fetch('/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: document.getElementById('name').value,
+                    role: finalRole,
+                    jd: document.getElementById('jd').value
+                })
+            });
+
+            if(res.ok) window.location.href = '/chat';
+        });
+    </script>
+</body>
+</html>

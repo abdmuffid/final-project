@@ -1,4 +1,6 @@
 import os
+import re
+import json
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -7,302 +9,596 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 class LLMEvaluator:
+    """
+    FITUR LENGKAP:
+    - Advanced Prompt Engineering (Chain-of-Thought, Few-Shot)
+    - STAR Method Guidance
+    - Red Flag Detection System
+    - Adaptive Difficulty
+    - Context-Aware Follow-ups
+    - Behavioral Pattern Analysis
+    - Sentiment-Aware Bridging (Fitur Integrasi)
+    """
+    
     def __init__(self):
         self.client = Groq(api_key=GROQ_API_KEY)
-        self.model = "llama-3.3-70b-versatile"
+        self.model = "moonshotai/kimi-k2-instruct"
 
-    def _chat(self, prompt, system_role="Kamu adalah HRD Interviewer Profesional & Analis Ahli."):
+    def _chat(self, prompt, system_role="Kamu adalah HRD Interviewer Profesional & Analis Ahli yang RAMAH.", temperature=0.7, max_tokens=5000, response_format=None):
+        """Enhanced chat dengan error handling, retry logic, dan JSON support"""
         try:
-            completion = self.client.chat.completions.create(
-                messages=[
+            params = {
+                "messages": [
                     {"role": "system", "content": system_role},
                     {"role": "user", "content": prompt}
                 ],
-                model=self.model,
-                temperature=0.7, # Sedikit kreatif untuk bridging natural
-                max_tokens=3000 
-            )
+                "model": self.model,
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            if response_format == "json_object":
+                params["response_format"] = {"type": "json_object"}
+
+            completion = self.client.chat.completions.create(**params)
             return completion.choices[0].message.content.strip()
         except Exception as e:
-            return f"Error LLM: {e}"
+            print(f"⚠️ Error LLM: {e}")
+            return ""
 
     # =========================================================================
-    # 1. GENERATOR PERTANYAAN
+    # SECTION 1: OPENING & WARMING UP
     # =========================================================================
 
     def generate_opening(self, user_name, job_role, time_context="Selamat Pagi"):
-        prompt = f"""
-        Nama Kandidat: {user_name}
-        Posisi Dilamar: {job_role}
-        Waktu Saat Ini: {time_context}
-        
-        Tugas: Buatlah kalimat pembuka interview yang profesional namun ramah.
-        Instruksi Wajib: 
-        1. Mulailah kalimat persis dengan ucapan salam waktu: "{time_context}".
-        2. Sambut kandidat dan sebutkan secara spesifik posisi ({job_role}) yang dilamar.
-        3. Bahasa: Bahasa Indonesia yang natural.
-        
-        Output: HANYA kalimat ucapannya saja.
         """
-        return self._chat(prompt)
+        - Warm & Professional tone
+        - Sets expectation
+        - Builds rapport
+        """
+        prompt = f"""
+        Kamu adalah HRD senior yang ramah dan berpengalaman 10+ tahun dalam interview.
+        
+        KONTEKS:
+        - Kandidat: {user_name}
+        - Posisi: {job_role}
+        - Waktu: {time_context}
+        
+        TUGAS: Buat pembukaan interview yang:
+        1. WAJIB mulai dengan "{time_context}"
+        2. Sambut hangat dengan menyebut nama kandidat
+        3. Sebutkan posisi yang dilamar
+        4. Berikan konteks tentang flow interview (akan ada pertanyaan umum, teknis, dan behavioral)
+        5. Buat kandidat merasa nyaman tapi tetap profesional
+        
+        CONTOH TONE YANG DIINGINKAN:
+        "{time_context}, {user_name}! Terima kasih sudah meluangkan waktu untuk bergabung dengan kami hari ini. 
+        Saya akan memandu Anda dalam sesi interview untuk posisi {job_role}. Nanti kita akan berbincang 
+        tentang pengalaman Anda, keahlian teknis, dan bagaimana Anda menangani berbagai situasi kerja. 
+        Santai saja, ini adalah diskusi dua arah. Siap untuk memulai?"
+        
+        PANJANG: Maksimal 60 kata.
+        BAHASA: Bahasa Indonesia natural, bukan terjemahan kaku.
+        
+        Output: HANYA kalimat pembukaan.
+        """
+        return self._chat(prompt, temperature=0.8)
 
-    def paraphrase_question(self, question, job_role="Kandidat", prev_answer=None):
-        # Logika Bridging: Respons dulu jawaban sebelumnya
+    # =========================================================================
+    # SECTION 2: QUESTION GENERATOR (WITH BRIDGING INTEGRATION)
+    # =========================================================================
+
+    def paraphrase_question_contextual(self, question, job_role, prev_answer=None, conversation_context=""):
+        """
+        UPGRADED: Paraphrase dengan awareness terhadap konteks percakapan + SENTIMENT BRIDGING.
+        """
+        # --- LOGIKA SENTIMEN BRIDGING ---
         bridge_instruction = ""
         if prev_answer:
             bridge_instruction = f"""
             Konteks Jawaban Terakhir Kandidat: "{prev_answer}"
-            Instruksi Tambahan: Mulailah dengan 1 kalimat pendek yang merespons/mengapresiasi jawaban terakhir kandidat secara natural (misal: "Menarik sekali.", "Poin yang bagus.", "Saya mengerti pendekatannya."), BARU kemudian ajukan pertanyaan target.
+            INSTRUKSI BRIDGING TAMBAHAN:
+            - Analisis sentimen jawaban (Positif/Negatif/Kasar/Singkat).
+            - Jika Negatif/Kasar: JANGAN memuji. Gunakan nada netral.
+            - Jika Bagus: Beri apresiasi singkat.
+            - Gabungkan respons ini di awal pertanyaan secara natural.
             """
-        
+        # ---------------------------------------------------
+
         prompt = f"""
-        Konteks Peran: {job_role}
-        Pertanyaan Baru Target: "{question}"
+        Kamu adalah ahli komunikasi dalam interview.
+        
+        KONTEKS PERCAKAPAN SEBELUMNYA:
+        {conversation_context if conversation_context else "Baru memulai interview"}
         {bridge_instruction}
         
-        Tugas: Sampaikan pertanyaan target dengan gaya lisan natural Indonesia.
-        Panduan:
-        - Pertahankan nada profesional namun tidak kaku.
-        - Gunakan pertanyaan terbuka (open-ended).
-        - WAJIB: Pertanyaan harus DI BAWAH 45 KATA (Termasuk respons awal jika ada).
-        - Bahasa: Bahasa Indonesia.
+        PERTANYAAN ASLI: "{question}"
+        POSISI: {job_role}
         
-        Output: HANYA kalimat HRD yang akan diucapkan.
+        TUGAS: Ubah pertanyaan menjadi natural dengan aturan:
+        
+        1. **BRIDGING** (Wajib jika ada konteks jawaban sebelumnya):
+           - Buat transisi smooth sesuai instruksi sentimen di atas.
+        
+        2. **TONE**:
+           - Conversational, bukan interogasi
+           - Professional tapi approachable
+           - Gunakan "Anda" bukan "kamu"
+        
+        3. **STRUCTURE**:
+           - Open-ended question
+           - Encourage storytelling
+           - Maksimal 50 kata (termasuk bridging)
+        
+        4. **AVOID**:
+           - Jangan pakai "Bisakah Anda jelaskan..." (terlalu kaku)
+           - Lebih baik: "Bagaimana...", "Apa yang...", "Ceritakan tentang..."
+        
+        Output: HANYA kalimat pertanyaan yang sudah diubah.
         """
-        return self._chat(prompt)
+        return self._chat(prompt, temperature=0.7)
 
-    # --- VARIASI 1: COMBO (PROYEK GABUNGAN) ---
-    def generate_technical_question_combo(self, job_desc, history_q, job_role, prev_answer=None):
-        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+    def generate_technical_question_starmethod(self, job_desc, history_q, job_role, prev_answer=None, difficulty_level="medium"):
+        """
+        TECHNICAL QUESTION dengan STAR Method guidance.
+        MODIFIED: Return Dictionary (JSON) untuk keperluan logging skripsi.
+        """
+        
+        # --- LOGIKA SENTIMEN BRIDGING (TETAP ADA) ---
+        bridge_instruction = ""
+        if prev_answer:
+            bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
+        # --------------------------------
 
+        difficulty_instructions = {
+            "easy": "Fokus pada tools dan konsep dasar. Contoh: 'Jelaskan pengalaman Anda menggunakan SQL'",
+            "medium": "Fokus pada proyek nyata dan problem-solving. Contoh: 'Ceritakan saat Anda harus mengoptimasi query yang lambat'",
+            "hard": "Fokus pada skenario kompleks dan decision-making. Contoh: 'Bagaimana Anda mendesain data pipeline untuk handle 1M records/day?'"
+        }
+        
         prompt = f"""
-        Kamu adalah Interviewer Teknis yang spesialis untuk posisi {job_role}.
-        Konteks JD: "{job_desc[:1500]}"
-        History Pertanyaan: {history_q}
+        Kamu adalah Technical Interviewer senior yang asik dan ramah untuk posisi {job_role}.
+        
+        JOB DESCRIPTION (Key Skills):
+        {job_desc[:2500]}
+        
+        PERTANYAAN SEBELUMNYA:
+        {history_q[-3:] if len(history_q) > 3 else history_q}
+        
+        INSTRUKSI BRIDGING:
         {bridge_instruction}
-
-        Tugas: Buat SATU "Pertanyaan Teknis Kombo".
         
-        Panduan Detail:
-        1. Pindai JD untuk menemukan 2-3 skill teknis utama.
-        2. Buat satu "Studi Kasus/Skenario" spesifik yang memaksa kandidat menjelaskan bagaimana mereka menggunakan skill-skill tersebut secara bersamaan dalam PROYEK NYATA.
-        3. FOKUS: Galilah pengalaman Hands-on, bukan sekadar definisi teori.
-        4. Cek History: JANGAN tanyakan skill yang sudah pernah ditanyakan sebelumnya.
-        5. WAJIB: Pertanyaan harus DI BAWAH 50 KATA (Termasuk respons awal).
-        6. Bahasa: Bahasa Indonesia.
-
-        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
+        DIFFICULTY LEVEL: {difficulty_level.upper()}
+        {difficulty_instructions.get(difficulty_level, "medium")}
+        
+        TUGAS UTAMA:
+        Analisis JD, pilih skill, dan buat pertanyaan teknis. Output HARUS dalam format JSON.
+        
+        INSTRUKSI PEMBUATAN PERTANYAAN (Wajib diterapkan pada field 'question_text'):
+        
+        1. **STAR METHOD GUIDANCE**:
+           Pertanyaan harus memandu kandidat untuk jawab dengan format:
+           - Situation: Konteks proyek/masalah
+           - Task: Tanggung jawab mereka
+           - Action: Langkah konkret yang diambil
+           - Result: Hasil yang terukur
+        
+        2. **TEKNOLOGI SPESIFIK**:
+           - Pilih maksimal 10 skill dari JD yang BELUM ditanyakan di history
+           - Gabungkan dalam satu skenario real-world
+        
+        3. **FORMAT KALIMAT**:
+           - Dimulai dengan: "Ceritakan pengalaman Anda ketika..." atau "Bagaimana Anda menangani situasi..."
+           - Maksimal 100 kata
+           - BAHASA: Bahasa Indonesia formal dan natural.
+           - Sertakan bridging sentiment di awal kalimat (jika ada instruksi bridging).
+        
+        FORMAT OUTPUT JSON (Wajib):
+        {{
+            "detected_skills": ["Sebutkan skill 1 dari JD", "Sebutkan skill 2"],
+            "expected_criteria": "Jelaskan poin-poin kunci jawaban ideal yang diharapkan secara teknis (sebagai kunci jawaban)",
+            "question_text": "Kalimat pertanyaan lengkap (termasuk bridging) sesuai instruksi di atas"
+        }}
         """
-        return self._chat(prompt)
+        
+        # Minta JSON Object ke LLM
+        raw_response = self._chat(prompt, temperature=0.7, response_format="json_object")
+        
+        try:
+            # Bersihkan potensi markdown formatting
+            clean_json = raw_response.replace("```json", "").replace("```", "").strip()
+            
+            # Parse ke Dictionary Python
+            parsed_data = json.loads(clean_json)
+            return parsed_data
+            
+        except json.JSONDecodeError:
+            print("⚠️ Warning: Gagal parse JSON Teknikal, menggunakan fallback string.")
+            return {
+                "detected_skills": ["General Technical Skill"],
+                "expected_criteria": "Kesesuaian dengan metode STAR, pemecahan masalah teknis, dan relevansi dengan JD.",
+                "question_text": raw_response 
+            }
 
-    # --- VARIASI 2: CONCEPT (TEORI MENDALAM) ---
-    def generate_technical_concept(self, job_desc, history_q, job_role, prev_answer=None):
-        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+    def generate_behavioral_question_situational(self, sub_category, job_role, history_q, prev_answer=None):
+        """
+        BEHAVIORAL QUESTION dengan situational approach.
+        """
+        # --- LOGIKA SENTIMEN BRIDGING ---
+        bridge_instruction = ""
+        if prev_answer:
+             bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
+        # --------------------------------
 
+        behavioral_frameworks = {
+            "Leadership": "kepemimpinan: memimpin tim, mengambil inisiatif, atau mentoring junior",
+            "Conflict": "konflik: perbedaan pendapat dengan rekan/atasan, menangani feedback negatif",
+            "Pressure": "tekanan: deadline ketat, multiple priorities, atau situasi crisis",
+            "Failure": "kegagalan: project yang tidak sesuai rencana, mistake yang dibuat, atau lesson learned",
+            "Teamwork": "kolaborasi: bekerja dengan tim yang sulit, cross-functional collaboration",
+            "Adaptability": "perubahan: situasi yang tidak terduga, perubahan requirement, atau pivot strategy"
+        }
+        
+        framework = behavioral_frameworks.get(sub_category, "situasi kerja yang challenging")
+        
         prompt = f"""
-        Kamu adalah Interviewer Teknis.
-        Konteks JD: "{job_desc[:1500]}"
-        History Pertanyaan: {history_q}
+        Kamu adalah Behavioral Interview Expert yang ramah dan tetap formal.
+        
+        FOKUS AREA: {sub_category}
+        POSISI: {job_role}
+        PERTANYAAN SEBELUMNYA: {history_q[-2:] if len(history_q) > 2 else "Belum ada"}
         {bridge_instruction}
-
-        Tugas: Buat SATU "Pertanyaan Konseptual/Deep Dive".
         
-        Panduan Detail:
-        1. Cari skill di JD yang BELUM sering dibahas di History Pertanyaan.
-        2. Minta kandidat menjelaskan 'Cara Kerja', 'Best Practice', atau 'Perbedaan' dari teknologi tersebut.
-        3. Tujuannya menguji pemahaman teoritis yang mendalam.
-        4. WAJIB: Pertanyaan harus DI BAWAH 40 KATA (Termasuk respons awal).
-        5. Bahasa: Bahasa Indonesia.
-
-        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
+        TUGAS: Buat SATU pertanyaan behavioral tentang {framework}.
+        
+        FRAMEWORK YANG HARUS DIIKUTI:
+        1. **STRUKTUR PERTANYAAN**:
+           - Mulai dengan: "Ceritakan tentang suatu waktu ketika..."
+           - Atau: "Berikan contoh situasi di mana Anda..."
+           - Spesifik pada situasi real, bukan hypothetical
+        
+        2. **PROBING UNTUK STAR**:
+           - Pastikan pertanyaan mendorong kandidat cerita lengkap (S-T-A-R).
+        
+        3. **RELEVANSI DENGAN {job_role}**:
+           - Connect behavioral aspect dengan job requirement
+        
+        PANJANG: Maksimal 100 kata (Termasuk Bridging).
+        BAHASA: Bahasa Indonesia yang formal dan natural.
+        Output: HANYA pertanyaannya.
         """
-        return self._chat(prompt)
+        return self._chat(prompt, temperature=0.6)
 
-    # --- VARIASI 3: CASE (STUDI KASUS ERROR) ---
-    def generate_technical_case(self, job_desc, history_q, job_role, prev_answer=None):
-        bridge_instruction = f'User baru saja menjawab: "{prev_answer}". Berikan respons singkat yang nyambung (apresiasi/validasi) SEBELUM bertanya.' if prev_answer else ""
+    # =========================================================================
+    # SECTION 3: FOLLOW-UP SYSTEM (JSON & ADAPTIVE)
+    # =========================================================================
+
+    def analyze_answer_quality(self, question, user_answer, answer_key, job_role, q_category="General"):
+        """
+        ANSWER ANALYZER dengan JSON Output.
+        Menggunakan logika STAR Method detection dari user.
+        """
+
+        # --- LOGIKA USER (TIDAK DIKURANGI) ---
+        star_required_categories = ["Behavioral", "Technical-STAR", "Technical-Case", "StressTest"]
+        is_star_needed = "true" if q_category in star_required_categories else "false"
+        # -------------------------------------
 
         prompt = f"""
-        Kamu adalah User/Lead Teknis.
-        Konteks JD: "{job_desc[:1500]}"
-        History Pertanyaan: {history_q}
+        Kamu adalah Expert Interview Analyst yang sangat detail dan objektif.
+        
+        KONTEKS:
+        - Posisi: {job_role}
+        - Pertanyaan: "{question}"
+        - Jawaban Kandidat: "{user_answer}"
+        - Expected/Ideal Answer: "{answer_key}"
+        
+        MASALAH:
+        Kunci Jawaban Referensi mungkin berasal dari domain/posisi yang berbeda (misal: Marketing), 
+        sedangkan Pelamar melamar sebagai {job_role}.
+        
+        TUGAS UTAMA:
+        Nilai jawaban pelamar berdasarkan **STRUKTUR dan ESENSI** dari Kunci Jawaban, BUKAN kesamaan topik kata-per-kata. Buat dalam format JSON!
+        
+        INSTRUKSI PENILAIAN ADAPTIF (PENTING):
+        1. **Ekstrak Pola Kunci**: Lihat Kunci Jawaban. Apa intinya? (Misal: Ada Masalah -> Aksi -> Hasil).
+        2. **Abaikan Domain Kunci**: Jika Kunci bicara soal "Jualan", tapi User bicara soal "Coding" (sesuai role {job_role}), ITU BENAR. Jangan kurangi nilai karena beda topik.
+        3. **Cek Relevansi Role**: Pastikan jawaban user relevan dengan role {job_role}.
+
+        KRITERIA ANALISIS:
+        1. **CEK METODE STAR** (Situation, Task, Action, Result):
+            - Status Wajib STAR: {is_star_needed.upper()}
+            - JIKA Kategori adalah 'Motivational', 'Intro', atau 'Concept': JANGAN cari STAR. Nilai berdasarkan kejelasan & relevansi saja.
+            - JIKA Kategori adalah 'Behavioral' atau 'Technical Case': WAJIB ada STAR.
+        
+        2. **QUALITY SCORE (1-10)**:
+            - 9-10: Excellent, STAR lengkap.
+            - 7-8: Bagus, ada pengalaman nyata.
+            - 5-6: Cukup, terlalu umum.
+            - <5: Buruk, teori doang/tidak menjawab.
+        
+        3. **RED FLAG DETECTION**:
+            - Deteksi: "Tidak tahu", "Asal daftar", "Ga mau lembur", "Kasar", "Bohong", (dan jawaban tidak profesional lainnya).
+        
+        4. **STAR COMPLETENESS**:
+            - Situation, Task, Action, Result.
+        
+        5. **FOLLOW-UP DECISION**:
+            - needs_followup: true JIKA Score < 7 ATAU STAR tidak lengkap ATAU Jawaban singkat.
+            - JIKA Score >= 7: needs_followup HARUS false (Jangan tanya lagi detailnya).
+        
+        6. **FOLLOW-UP QUESTION**:
+            - Buat pertanyaan follow-up (max 50 kata) KHUSUS menggali missing element.
+        
+        OUTPUT FORMAT (JSON ONLY):
+        {{
+            "quality_score": 7,
+            "has_red_flags": false,
+            "red_flag_types": [],
+            "needs_followup": true,
+            "followup_question": "Pertanyaan follow-up...",
+            "reasoning": "Alasan penilaian..." 
+        }}
+        """
+        
+        # Request ke LLM
+        raw_result = self._chat(prompt, temperature=0.2, response_format="json_object")
+        
+        try:
+            # --- LAPISAN 1: ROBUST CLEANER ---
+            # Buang markdown dan spasi
+            clean_result = raw_result.replace("```json", "").replace("```", "").strip()
+            
+            # Cari kurung kurawal terluar
+            start_idx = clean_result.find('{')
+            end_idx = clean_result.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1:
+                clean_result = clean_result[start_idx : end_idx + 1]
+            
+            parsed = json.loads(clean_result)
+            
+            # Update State Sukses
+            self.quality_scores.append(parsed.get("quality_score", 5))
+            if parsed.get("has_red_flags"): 
+                self.red_flags.extend(parsed.get("red_flag_types", []))
+
+            return parsed
+
+        except Exception as e:
+            # --- LAPISAN 2: REGEX RESCUE (Penyelamat Data) ---
+            print(f"⚠️ JSON Gagal, mencoba Regex Rescue...")
+            
+            # Coba cari reasoning manual pakai pola Regex
+            reason_match = re.search(r'"reasoning"\s*:\s*"(.*?)"', raw_result, re.DOTALL)
+            fup_match = re.search(r'"followup_question"\s*:\s*"(.*?)"', raw_result, re.DOTALL)
+            score_match = re.search(r'"quality_score"\s*:\s*(\d+)', raw_result)
+            
+            reasoning_text = reason_match.group(1) if reason_match else f"Analisis gagal diparsing. Raw: {raw_result[:50]}..."
+            fup_text = fup_match.group(1) if fup_match else "Bisa ceritakan lebih detail bagian ini?"
+            score_val = int(score_match.group(1)) if score_match else 5
+            
+            # Kembalikan data hasil rescue
+            return {
+                "quality_score": score_val, 
+                "has_red_flags": False, 
+                "red_flag_types": [],
+                "needs_followup": True, 
+                "followup_question": fup_text, 
+                "missing_elements": [],
+                "reasoning": f"[RESCUED] {reasoning_text}" 
+            }
+
+
+    def generate_adaptive_followup(self, original_question, user_answer, missing_elements, round_number=1):
+        """
+        Generate follow-up yang adaptive berdasarkan missing elements.
+        """
+        prompt = f"""
+        Kamu adalah interviewer yang skilled.
+        
+        KONTEKS:
+        - Pertanyaan Awal: "{original_question}"
+        - Jawaban Kandidat: "{user_answer}"
+        - Element yang Hilang: {missing_elements}
+        - Round: {round_number}
+        
+        TUGAS: Buat follow-up question yang:
+        1. FOKUS PADA MISSING ELEMENTS (misal: "Apa hasilnya?", "Bagaimana caranya?").
+        2. NATURAL TONE: Jangan interogasi. Gunakan "Menarik, bisa dijelaskan..."
+        3. Max 60 kata.
+        
+        Output: HANYA pertanyaan follow-up.
+        """
+        return self._chat(prompt, temperature=0.7)
+
+    # =========================================================================
+    # SECTION 4: ADAPTIVE DIFFICULTY & STRESS TEST
+    # =========================================================================
+
+    def get_adaptive_difficulty(self, quality_scores):
+        """Menentukan difficulty level berdasarkan performance kandidat (Stateless)."""
+        if not quality_scores or len(quality_scores) < 3:
+            return "medium"
+        
+        avg_score = sum(quality_scores[-5:]) / min(len(quality_scores), 5)
+        
+        if avg_score >= 8: return "hard"
+        elif avg_score >= 6: return "medium"
+        else: return "easy"
+
+    def generate_stress_test_question(self, job_role, job_desc, prev_answer=None):
+        """
+        Generate pertanyaan stress test untuk melihat kandidat under pressure.
+        """
+        # --- LOGIKA SENTIMEN BRIDGING ---
+        bridge_instruction = ""
+        if prev_answer:
+             bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging SEBELUM tanya.'
+        # --------------------------------
+
+        prompt = f"""
+        Kamu adalah interviewer yang ingin test kandidat dalam situasi pressure.
+        
+        POSISI: {job_role}
+        JOB DESC (Key Challenges): {job_desc[:1000]}
         {bridge_instruction}
-
-        Tugas: Buat SATU "Studi Kasus Masalah (Troubleshooting)".
         
-        Panduan Detail:
-        1. Berikan situasi singkat tentang masalah teknis/error/bug yang relevan dengan JD.
-        2. Tanyakan langkah solutif apa yang akan diambil kandidat.
-        3. Contoh: "Jika query SQL lambat saat data membesar, apa langkah optimasi Anda?"
-        4. WAJIB: Pertanyaan harus DI BAWAH 50 KATA (Termasuk respons awal).
-        5. Bahasa: Bahasa Indonesia.
-
-        Output: HANYA kalimat pertanyaannya saja (Respons + Pertanyaan).
+        TUGAS: Buat SATU pertanyaan "stress test" yang:
+        1. SKENARIO REALISTIS TAPI CHALLENGING (Deadline ketat, Data berantakan, Stakeholder sulit).
+        2. FRAMEWORK: "Bayangkan Anda dalam situasi X. Apa yang Anda lakukan?"
+        3. TUJUAN: Test problem-solving under pressure.
+        
+        PANJANG: Maksimal 100 kata.
+        Output: HANYA pertanyaan stress test.
         """
-        return self._chat(prompt)
+        return self._chat(prompt, temperature=0.7)
 
     # =========================================================================
-    # 2. FASE FOLLOW-UP
+    # SECTION 5: CLOSING, HINTS & USER QUESTIONS
     # =========================================================================
 
-    def check_response_and_followup(self, question, user_answer, ideal_answer):
+    # Menerima user_name & quality_scores
+    def generate_closing(self, job_role, user_name="Kandidat", quality_scores=None):
+        """Generate closing statement yang adaptive."""
+        avg_score = 0
+        if quality_scores:
+            avg_score = sum(quality_scores)/len(quality_scores)
+            
+        quality = "excellent" if avg_score >= 8 else "good" if avg_score >= 6 else "fair"
+        
         prompt = f"""
-        Kamu adalah ahli dalam membuat pertanyaan tindak lanjut (follow-up) untuk menggali wawasan lebih dalam.
+        Kamu adalah HRD. Posisi: {job_role}. Kandidat: {user_name}. Kualitas Interview: {quality}.
         
-        Pertanyaan Awal: "{question}"
-        Jawaban Kandidat: "{user_answer}"
-        Kunci Jawaban/Konteks Ideal: "{ideal_answer}"
-        
-        Tugas Analisis:
-        1. Apakah jawaban tersebut menunjukkan "Pengalaman Nyata/Praktek" atau hanya sekadar teori/hafalan?
-        2. Apakah jawabannya terlalu singkat atau tidak jelas?
-        
-        CONSTRAINT KERAS (JANGAN DILANGGAR):
-        - JANGAN PERNAH menyertakan teks analisis atau intro seperti "Berdasarkan jawaban kandidat...".
-        - JANGAN ada "internal monologue".
-        - Output HANYA SATU hal:
-            a) Teks "[NEXT]" jika jawaban sudah bagus.
-            b) Kalimat pertanyaan follow-up (Bahasa Indonesia) jika jawaban kurang.
+        TUGAS: Buat closing statement yang:
+        1. Apresiasi waktu kandidat.
+        2. Buka kesempatan bertanya (Q&A).
+        3. Tone: {quality} (Positif/Netral/Respectful).
+        4. Max 50 kata.
+        Output: HANYA closing statement.
         """
-        return self._chat(prompt)
-
-    # =========================================================================
-    # 3. CLOSING INTENT
-    # =========================================================================
+        return self._chat(prompt, temperature=0.8)
 
     def analyze_closing_intent(self, user_input):
+        """Intent Detection (ASK vs NO)"""
         prompt = f"""
-        Tugas: Analisis kalimat kandidat di sesi akhir interview.
-        Kalimat Kandidat: "{user_input}"
-        
-        Tentukan INTENSI kandidat:
-        1. Jika kandidat mengajukan pertanyaan atau minta penjelasan -> Output: "ASK"
-        2. Jika kandidat bilang cukup, tidak ada, sudah jelas, atau terima kasih saja -> Output: "NO"
-        
-        Contoh:
-        - "Apa ada lembur?" -> ASK
-        - "Tidak ada pertanyaan." -> NO
-        - "Cukup jelas bu." -> NO
-        - "Sebenarnya saya ingin tahu soal gaji." -> ASK
-        - "Apakah tidak ada WFH?" -> ASK (Walau ada kata 'tidak', ini pertanyaan)
-        
+        Kalimat: "{user_input}"
+        Tentukan INTENSI: "ASK" (Nanya/Minta Info) atau "NO" (Nolak/Cukup/Makasih).
         Output HANYA satu kata: ASK atau NO.
         """
-        try:
-            completion = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model, temperature=0.1, max_tokens=5 
-            )
-            return completion.choices[0].message.content.strip().upper()
-        except:
-            return "NO"
+        return self._chat(prompt, temperature=0.1).upper()
 
-    def answer_user_question(self, user_question):
-        return self._chat(f"Jawab pertanyaan kandidat ini secara singkat, positif, dan profesional (Bahasa Indonesia): '{user_question}'")
+    def answer_user_question_contextual(self, user_question, job_role):
+        """Answer dengan context awareness."""
+        prompt = f"""
+        Kamu adalah HRD Interviewer. Pertanyaan Kandidat: "{user_question}". Posisi: {job_role}.
+        
+        TUGAS: Jawab pertanyaan kandidat secara diplomatis dan profesional.
+        
+        ATURAN JAWABAN:
+        1. **JIKA Bertanya GAJI/BENEFIT/LEMBUR:**
+           - Jawab DIPLOMATIS & NORMATIF.
+           - "Kami menawarkan paket kompetitif sesuai pasar."
+           - JANGAN sebut angka nominal (Anti-Halusinasi).
+           
+        2. **JIKA Bertanya BUDAYA KERJA / TIM:**
+           - Jawab ANTUSIAS & POSITIF.
+           - Gambarkan lingkungan yang kolaboratif, agile, dan suportif.
+           - Tekankan kesempatan belajar (growth mindset).
+           
+        3. **JIKA Bertanya TANTANGAN / EKSPEKTASI:**
+           - Jawab REALISTIS tapi OPTIMIS.
+           - "Tantangannya dinamis, tapi kami fokus pada solusi dan dampak."
+        
+        Output: HANYA jawaban langsung ke kandidat.
+        """
+        return self._chat(prompt, temperature=0.7)
+
+    def generate_subtle_hint(self, question, weak_answer):
+        """Generate gentle hint untuk kandidat yang struggling."""
+        prompt = f"""
+        Kamu coach interview. Q: "{question}". A: "{weak_answer}".
+        TUGAS: Beri hint lembut (JANGAN SPOILER JAWABAN).
+        Contoh: "Coba pikirkan dari sisi..."
+        Max 30 kata.
+        Output: HANYA hint.
+        """
+        return self._chat(prompt, temperature=0.8)
+
+    def detect_need_for_break(self, transcript_length, quality_trend):
+        """Detect apakah kandidat butuh break."""
+        if transcript_length > 5000 and quality_trend == "declining":
+            return True, "Baik, kita sudah banyak membahas topik. Mau istirahat sebentar? Ambil air dulu."
+        return False, ""
 
     # =========================================================================
-    # 4. FINAL REPORT
+    # SECTION 6: FINAL REPORT (FIXED & FULL FEATURED)
     # =========================================================================
 
-    def generate_final_report(self, user_name, job_role, job_desc, full_transcript):
-        # RUBRIK LENGKAP DARI STANDAR IELTS
-        rubric = """
-        SISTEM PENILAIAN KOMUNIKASI (Skala 0-10):
-        - 10: Penguasaan penuh, penggunaan bahasa sangat tepat, akurat, lancar, menunjukkan pemahaman total.
-        - 09: Penguasaan penuh dengan sedikit ketidaktepatan sesekali. Menangani argumen kompleks dengan baik.
-        - 08: Penguasaan operasional dengan sedikit kesalahan. Bisa menangani bahasa/topik kompleks.
-        - 07: Penguasaan efektif meski ada ketidaktepatan. Memahami bahasa yang cukup kompleks.
-        - 06: Penguasaan parsial/sebagian, mengerti makna umum, tapi sering ada kesalahan.
-        - 05: Kompetensi dasar terbatas pada situasi yang familiar saja.
-        - 04: Hanya mengerti makna umum di situasi yang sangat familiar.
-        - 03: Sangat kesulitan memahami percakapan.
-        - 02: Tidak ada kemampuan komunikasi kecuali beberapa kata terpisah.
-        - 01: Tidak menjawab.
+    # Menerima scores dan red_flags agar tidak error TypeError
+    def generate_final_report(self, user_name, job_role, job_desc, full_transcript, quality_scores, red_flags):
         """
-
-        # 12 FAKTOR ANALISIS
-        factors = """
-        FAKTOR ANALISIS YANG HARUS DINILAI:
-        1. Skill Komunikasi (Tata bahasa, kosa kata, kejelasan)
-        2. Waktu Menjawab (Sigap vs bertele-tele)
-        3. Kepercayaan Diri (Tegas vs ragu-ragu)
-        4. Kejelasan (Struktur jawaban)
-        5. Sikap/Attitude (Positif, hormat, antusias)
-        6. Relevansi (Apakah jawaban nyambung dengan pertanyaan?)
-        7. Kedalaman Pengetahuan (Detail vs dangkal)
-        8. Kemampuan Pemecahan Masalah (Logika berpikir analitis)
-        9. Contoh dan Bukti (Apakah memberikan contoh nyata?)
-        10. Kemampuan Mendengar (Merespons follow-up dengan tepat)
-        11. Konsistensi (Apakah jawaban bertentangan?)
-        12. Adaptabilitas (Menangani pertanyaan sulit)
+        REPORT GENERATOR (EDISI COACH UNTUK JOBSEEKER).
+        Fokus: Memberikan feedback konstruktif agar user bisa memperbaiki diri.
         """
+        # Hitung rata-rata skor
+        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+        
+        if not quality_scores:
+            readiness = "Belum Ada Data"
+        elif avg_quality >= 8:
+            readiness = "Sangat Siap (Ready to Apply)"
+        elif avg_quality >= 6:
+            readiness = "Cukup Siap (Perlu Sedikit Polesan)"
+        else:
+            readiness = "Butuh Latihan Intensif"
 
         prompt = f"""
-        Kamu adalah Evaluator Interview & Analis Ahli.
-        KANDIDAT: {user_name}
-        POSISI DILAMAR: {job_role}
+        Kamu adalah AI Interview Coach & Mentor Karir yang suportif dan jujur.
+        Tugasmu BUKAN merekrut, tapi MEMBANTU kandidat ({user_name}) agar sukses di interview asli nanti.
+
+        Catatan Khusus:
+        - Jika transkrip sangat pendek, artinya user mengakhiri sesi lebih awal.
+        - Jangan menghakimi user, berikan saran bahwa "konsistensi menyelesaikan latihan adalah kunci keberhasilan".
         
-        TRANSKRIP WAWANCARA:
-        {full_transcript}
+        DATA SIMULASI:
+        - Posisi Target: {job_role}
+        - Skor Latihan: {avg_quality:.1f}/10
+        - Status: {readiness}
+        - Red Flags (Hal fatal): {red_flags}
         
-        DESKRIPSI PEKERJAAN (JD):
-        {job_desc[:1500]}
-
-        {rubric}
-        {factors}
-
-        ---------------------------------------------------------
-        TUGAS:
-        Berdasarkan transkrip dan faktor-faktor di atas, buatlah laporan evaluasi yang sangat mendetail.
-        Output hasilnya dalam format MARKDOWN terstruktur (Bahasa Indonesia).
-
+        TRANSKRIP LATIHAN:
+        {full_transcript[-6000:]}
+        
+        TUGAS: Buat Laporan Feedback (Markdown) yang edukatif.
+        
         STRUKTUR LAPORAN:
-
-        # 📑 LAPORAN HASIL EVALUASI: {job_role.upper()}
-
-        ## 1. 💡 EXECUTIVE INSIGHTS (Wawasan Utama)
-        *Berikan 3 wawasan/insight kunci tentang kandidat ini. Maksimal 25 kata per poin.*
-        * 🔹 (Insight 1)
-        * 🔹 (Insight 2)
-        * 🔹 (Insight 3)
-
-        ## 2. 📊 ANALISIS KOMUNIKASI
-        **Skor Komunikasi:** [0-10] / 10
-        **Status:** [Sangat Baik / Baik / Cukup / Kurang]
-        **Feedback:** (Tulis rangkuman 60 kata tentang skill komunikasi mereka berdasarkan rubrik).
-
-        ## 3. 📈 SCORECARD 12 FAKTOR
-        *Evaluasi kandidat berdasarkan faktor kunci (Confidence, Knowledge, dll).*
         
-        | Faktor Utama | Kualitas (Tinggi/Sedang/Rendah) | Catatan Analis |
-        | :--- | :--- | :--- |
-        | **Kepercayaan Diri & Sikap** | ... | ... |
-        | **Kedalaman Pengetahuan** | ... | ... |
-        | **Pemecahan Masalah (Logika)** | ... | ... |
-        | **Bukti & Contoh Nyata** | ... | (Apakah kandidat memberikan contoh real?) |
-
-        **Soft Skill Summary (15 kata):** ...
-
-        ## 4. 💬 ANALISIS BERBASIS BUKTI (QUOTES)
-        *Identifikasi kutipan spesifik dari transkrip yang mendukung analisismu.*
-
-        **✅ KEKUATAN (STRENGTHS)**
-        > "Kutip kalimat persis dari kandidat di sini..."
-        * **Analisis:** (Jelaskan kenapa kutipan ini menunjukkan kekuatan).
-
-        **⚠️ AREA PENGEMBANGAN (IMPROVEMENTS)**
-        > "Kutip kalimat persis dari kandidat di sini..."
-        * **Analisis:** (Jelaskan kenapa kutipan ini menunjukkan kekurangan/keraguan).
-
-        ## 5. ✅ CHECKLIST TEKNIS (VALIDASI JD)
-        *Cari skill HARD SKILL di JD, cek apakah muncul di jawaban.*
-        * [ ] (Skill 1) - (Muncul/Tidak Muncul)
-        * [ ] (Skill 2) - (Muncul/Tidak Muncul)
-
-        ## 6. ⚖️ KESIMPULAN AKHIR (VERDICT)
-        **Skor Keseluruhan:** [0-100]
-        **Rekomendasi:** [SIAP LANJUT / DIPERTIMBANGKAN / BELUM SESUAI]
-        **Saran Penutup:** (Saran pengembangan karir singkat).
+        # 🎓 Raport Latihan Interview: {user_name}
+        
+        ## 📊 Ringkasan Performa
+        (Berikan komentar mentor 1 paragraf tentang kesan umum performa user. Apakah percaya diri? Apakah jelas?)
+        * **Skor Latihan:** {avg_quality:.1f} / 10
+        * **Status Kesiapan:** {readiness}
+        
+        ## ✅ Apa yang Sudah Bagus (Pertahankan!)
+        (Sebutkan poin-poin kekuatan user berdasarkan transkrip. Puji penggunaan STAR method jika ada).
+        
+        ## ⚠️ Apa yang Perlu Diperbaiki (Fokus Latihan)
+        (Sebutkan kelemahan spesifik. Misal: "Jawaban terlalu singkat", "Kurang contoh nyata", "Terlalu bertele-tele").
+        * **Perhatian Khusus:** Jika ada Red Flags ({red_flags}), jelaskan kenapa itu berbahaya di mata HRD.
+        
+        ## 💡 Tips Spesifik untuk Posisi {job_role}
+        (Berikan saran teknis atau soft skill yang relevan dengan JD posisi ini).
+        
+        ## 📝 Rencana Latihan Selanjutnya
+        (Berikan 3 langkah konkret/PR buat user).
+        1. ...
+        2. ...
+        3. ...
+        
+        ## Kata Penutup Motivasi
+        (Kalimat penyemangat singkat).
+        
+        Gunakan Bahasa Indonesia yang luwes, tidak kaku, tapi tetap profesional layaknya mentor.
         """
-        
-        return self._chat(prompt, system_role="Kamu adalah Analis Evaluasi yang ketat dan objektif. Berikan feedback berbasis bukti.")
+        return self._chat(prompt, temperature=0.5, max_tokens=4000)

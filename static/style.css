@@ -1,0 +1,18 @@
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+.bg-chat { background-color: #e5ddd5; background-image: url("https://www.transparenttextures.com/patterns/cubes.png"); }
+
+.bubble-user {
+    border-top-right-radius: 0 !important;
+}
+.bubble-bot {
+    border-top-left-radius: 0 !important;
+}
+
+.animate-fade {
+    animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
