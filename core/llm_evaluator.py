@@ -9,38 +9,51 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 class LLMEvaluator:
-    """
-    FITUR LENGKAP:
-    - Advanced Prompt Engineering (Chain-of-Thought, Few-Shot)
-    - STAR Method Guidance
-    - Red Flag Detection System
-    - Adaptive Difficulty
-    - Context-Aware Follow-ups
-    - Behavioral Pattern Analysis
-    - Sentiment-Aware Bridging (Fitur Integrasi)
-    """
-    
     def __init__(self):
-        self.client = Groq(api_key=GROQ_API_KEY)
-        self.model = "moonshotai/kimi-k2-instruct"
+        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        # --- 1. UNIFIED PERSONA DEFINITION ---
+        # Ini adalah "jiwa" dari AI Anda. Satu prompt untuk semua fungsi.
+        self.SYSTEM_PERSONA = """
+        Anda adalah "Senior Talent Acquisition Specialist" & "Technical Recruiter" berpengalaman di perusahaan teknologi terkemuka.
+        
+        Karakteristik Anda:
+        1. Profesional namun ramah (Human-Centric).
+        2. Sangat tajam dalam menilai Hard Skill (Teknis) maupun Soft Skill (STAR Method).
+        3. Objektif dalam memberikan penilaian skor (0-10).
+        4. Gaya bicara: Formal, sopan, menggunakan Bahasa Indonesia yang baik dan mengalir (tidak kaku seperti robot).
+        5. Tujuan: Menemukan kandidat terbaik dengan menggali potensi mereka secara mendalam namun nyaman.
+        
+        Jangan pernah keluar dari karakter ini. Anda adalah satu orang yang sama dari awal sapaan hingga laporan akhir.
+        """
 
-    def _chat(self, prompt, system_role="Kamu adalah HRD Interviewer Profesional & Analis Ahli yang RAMAH.", temperature=0.7, max_tokens=5000, response_format=None):
-        """Enhanced chat dengan error handling, retry logic, dan JSON support"""
+    def _chat(self, prompt, system_role=None, temperature=0.7, max_tokens=5000, response_format=None):
+        """Enhanced chat dengan Unified Persona support"""
+        
+        # --- LOGIKA PERSONA ---
+        # Jika tidak ada system_role khusus yg dikirim, pakai Persona Utama HRD
+        if system_role is None:
+            active_role = self.SYSTEM_PERSONA
+        else:
+            active_role = system_role
+
         try:
             params = {
                 "messages": [
-                    {"role": "system", "content": system_role},
+                    {"role": "system", "content": active_role}, 
                     {"role": "user", "content": prompt}
                 ],
-                "model": self.model,
+                "model": "moonshotai/kimi-k2-instruct", 
                 "temperature": temperature,
                 "max_tokens": max_tokens
             }
+            
             if response_format == "json_object":
                 params["response_format"] = {"type": "json_object"}
 
             completion = self.client.chat.completions.create(**params)
             return completion.choices[0].message.content.strip()
+            
         except Exception as e:
             print(f"⚠️ Error LLM: {e}")
             return ""
@@ -56,8 +69,6 @@ class LLMEvaluator:
         - Builds rapport
         """
         prompt = f"""
-        Kamu adalah HRD senior yang ramah dan berpengalaman 10+ tahun dalam interview.
-        
         KONTEKS:
         - Kandidat: {user_name}
         - Posisi: {job_role}
@@ -105,8 +116,6 @@ class LLMEvaluator:
         # ---------------------------------------------------
 
         prompt = f"""
-        Kamu adalah ahli komunikasi dalam interview.
-        
         KONTEKS PERCAKAPAN SEBELUMNYA:
         {conversation_context if conversation_context else "Baru memulai interview"}
         {bridge_instruction}
@@ -156,8 +165,6 @@ class LLMEvaluator:
         }
         
         prompt = f"""
-        Kamu adalah Technical Interviewer senior yang asik dan ramah untuk posisi {job_role}.
-        
         JOB DESCRIPTION (Key Skills):
         {job_desc[:2500]}
         
@@ -241,8 +248,6 @@ class LLMEvaluator:
         framework = behavioral_frameworks.get(sub_category, "situasi kerja yang challenging")
         
         prompt = f"""
-        Kamu adalah Behavioral Interview Expert yang ramah dan tetap formal.
-        
         FOKUS AREA: {sub_category}
         POSISI: {job_role}
         PERTANYAAN SEBELUMNYA: {history_q[-2:] if len(history_q) > 2 else "Belum ada"}
@@ -284,8 +289,6 @@ class LLMEvaluator:
         # -------------------------------------
 
         prompt = f"""
-        Kamu adalah Expert Interview Analyst yang sangat detail dan objektif.
-        
         KONTEKS:
         - Posisi: {job_role}
         - Pertanyaan: "{question}"
@@ -394,8 +397,6 @@ class LLMEvaluator:
         Generate follow-up yang adaptive berdasarkan missing elements.
         """
         prompt = f"""
-        Kamu adalah interviewer yang skilled.
-        
         KONTEKS:
         - Pertanyaan Awal: "{original_question}"
         - Jawaban Kandidat: "{user_answer}"
@@ -437,8 +438,6 @@ class LLMEvaluator:
         # --------------------------------
 
         prompt = f"""
-        Kamu adalah interviewer yang ingin test kandidat dalam situasi pressure.
-        
         POSISI: {job_role}
         JOB DESC (Key Challenges): {job_desc[:1000]}
         {bridge_instruction}
@@ -467,8 +466,6 @@ class LLMEvaluator:
         quality = "excellent" if avg_score >= 8 else "good" if avg_score >= 6 else "fair"
         
         prompt = f"""
-        Kamu adalah HRD. Posisi: {job_role}. Kandidat: {user_name}. Kualitas Interview: {quality}.
-        
         TUGAS: Buat closing statement yang:
         1. Apresiasi waktu kandidat.
         2. Buka kesempatan bertanya (Q&A).
@@ -490,7 +487,7 @@ class LLMEvaluator:
     def answer_user_question_contextual(self, user_question, job_role):
         """Answer dengan context awareness."""
         prompt = f"""
-        Kamu adalah HRD Interviewer. Pertanyaan Kandidat: "{user_question}". Posisi: {job_role}.
+        Simpan informasi berpa Pertanyaan Kandidat: "{user_question}". Posisi: {job_role}.
         
         TUGAS: Jawab pertanyaan kandidat secara diplomatis dan profesional.
         
@@ -516,7 +513,7 @@ class LLMEvaluator:
     def generate_subtle_hint(self, question, weak_answer):
         """Generate gentle hint untuk kandidat yang struggling."""
         prompt = f"""
-        Kamu coach interview. Q: "{question}". A: "{weak_answer}".
+        Q: "{question}". A: "{weak_answer}".
         TUGAS: Beri hint lembut (JANGAN SPOILER JAWABAN).
         Contoh: "Coba pikirkan dari sisi..."
         Max 30 kata.
@@ -553,7 +550,6 @@ class LLMEvaluator:
             readiness = "Butuh Latihan Intensif"
 
         prompt = f"""
-        Kamu adalah AI Interview Coach & Mentor Karir yang suportif dan jujur.
         Tugasmu BUKAN merekrut, tapi MEMBANTU kandidat ({user_name}) agar sukses di interview asli nanti.
 
         Catatan Khusus:
