@@ -27,7 +27,7 @@ class LLMEvaluator:
         Jangan pernah keluar dari karakter ini. Anda adalah satu orang yang sama dari awal sapaan hingga laporan akhir.
         """
 
-    def _chat(self, prompt, system_role=None, temperature=0.7, max_tokens=5000, response_format=None):
+    def _chat(self, prompt, system_role=None, temperature=0.3, max_tokens=5000, response_format=None):
         """Enhanced chat dengan Unified Persona support"""
         
         # --- LOGIKA PERSONA ---
@@ -92,21 +92,21 @@ class LLMEvaluator:
         
         Output: HANYA kalimat pembukaan.
         """
-        return self._chat(prompt, temperature=0.8)
+        return self._chat(prompt, temperature=0.5)
 
     # =========================================================================
     # SECTION 2: QUESTION GENERATOR (WITH BRIDGING INTEGRATION)
     # =========================================================================
 
-    def paraphrase_question_contextual(self, question, job_role, prev_answer=None, conversation_context=""):
+    def paraphrase_question_contextual(self, question, job_role, last_user_response=None, conversation_context=""):
         """
         UPGRADED: Paraphrase dengan awareness terhadap konteks percakapan + SENTIMENT BRIDGING.
         """
         # --- LOGIKA SENTIMEN BRIDGING ---
         bridge_instruction = ""
-        if prev_answer:
+        if last_user_response:
             bridge_instruction = f"""
-            Konteks Jawaban Terakhir Kandidat: "{prev_answer}"
+            Konteks Jawaban Terakhir Kandidat: "{last_user_response}"
             INSTRUKSI BRIDGING TAMBAHAN:
             - Analisis sentimen jawaban (Positif/Negatif/Kasar/Singkat).
             - Jika Negatif/Kasar: JANGAN memuji. Gunakan nada netral.
@@ -144,9 +144,9 @@ class LLMEvaluator:
         
         Output: HANYA kalimat pertanyaan yang sudah diubah.
         """
-        return self._chat(prompt, temperature=0.7)
+        return self._chat(prompt, temperature=0.3)
 
-    def generate_technical_question_starmethod(self, job_desc, history_q, job_role, prev_answer=None, difficulty_level="medium"):
+    def generate_technical_question_starmethod(self, job_description, history_questions, job_role, last_user_response=None, difficulty_level="medium"):
         """
         TECHNICAL QUESTION dengan STAR Method guidance.
         MODIFIED: Return Dictionary (JSON) untuk keperluan logging skripsi.
@@ -154,8 +154,8 @@ class LLMEvaluator:
         
         # --- LOGIKA SENTIMEN BRIDGING (TETAP ADA) ---
         bridge_instruction = ""
-        if prev_answer:
-            bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
+        if last_user_response:
+            bridge_instruction = f'User menjawab: "{last_user_response}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
         # --------------------------------
 
         difficulty_instructions = {
@@ -166,10 +166,10 @@ class LLMEvaluator:
         
         prompt = f"""
         JOB DESCRIPTION (Key Skills):
-        {job_desc[:2500]}
+        {job_description[:2500]}
         
         PERTANYAAN SEBELUMNYA:
-        {history_q[-3:] if len(history_q) > 3 else history_q}
+        {history_questions[-3:] if len(history_questions) > 3 else history_questions}
         
         INSTRUKSI BRIDGING:
         {bridge_instruction}
@@ -208,7 +208,7 @@ class LLMEvaluator:
         """
         
         # Minta JSON Object ke LLM
-        raw_response = self._chat(prompt, temperature=0.7, response_format="json_object")
+        raw_response = self._chat(prompt, temperature=0.3, response_format="json_object")
         
         try:
             # Bersihkan potensi markdown formatting
@@ -226,14 +226,14 @@ class LLMEvaluator:
                 "question_text": raw_response 
             }
 
-    def generate_behavioral_question_situational(self, sub_category, job_role, history_q, prev_answer=None):
+    def generate_behavioral_question_situational(self, sub_category, job_role, history_questions, last_user_response=None):
         """
         BEHAVIORAL QUESTION dengan situational approach.
         """
         # --- LOGIKA SENTIMEN BRIDGING ---
         bridge_instruction = ""
-        if prev_answer:
-             bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
+        if last_user_response:
+             bridge_instruction = f'User menjawab: "{last_user_response}". Beri respons bridging (sesuai sentimen) SEBELUM tanya.'
         # --------------------------------
 
         behavioral_frameworks = {
@@ -250,7 +250,7 @@ class LLMEvaluator:
         prompt = f"""
         FOKUS AREA: {sub_category}
         POSISI: {job_role}
-        PERTANYAAN SEBELUMNYA: {history_q[-2:] if len(history_q) > 2 else "Belum ada"}
+        PERTANYAAN SEBELUMNYA: {history_questions[-2:] if len(history_questions) > 2 else "Belum ada"}
         {bridge_instruction}
         
         TUGAS: Buat SATU pertanyaan behavioral tentang {framework}.
@@ -271,7 +271,7 @@ class LLMEvaluator:
         BAHASA: Bahasa Indonesia yang formal dan natural.
         Output: HANYA pertanyaannya.
         """
-        return self._chat(prompt, temperature=0.6)
+        return self._chat(prompt, temperature=0.3)
 
     # =========================================================================
     # SECTION 3: FOLLOW-UP SYSTEM (JSON & ADAPTIVE)
@@ -293,14 +293,14 @@ class LLMEvaluator:
         - Posisi: {job_role}
         - Pertanyaan: "{question}"
         - Jawaban Kandidat: "{user_answer}"
-        - Expected/Ideal Answer: "{answer_key}"
+        - Jawaban Ideal: "{answer_key}"
         
         MASALAH:
         Kunci Jawaban Referensi mungkin berasal dari domain/posisi yang berbeda (misal: Marketing), 
         sedangkan Pelamar melamar sebagai {job_role}.
         
         TUGAS UTAMA:
-        Nilai jawaban pelamar berdasarkan **STRUKTUR dan ESENSI** dari Kunci Jawaban, BUKAN kesamaan topik kata-per-kata. Buat dalam format JSON!
+        Nilai jawaban pelamar berdasarkan **STRUKTUR dan ESENSI** dari Jawaban Ideal, BUKAN kesamaan topik kata-per-kata. Buat dalam format JSON!
         
         INSTRUKSI PENILAIAN ADAPTIF (PENTING):
         1. **Ekstrak Pola Kunci**: Lihat Kunci Jawaban. Apa intinya? (Misal: Ada Masalah -> Aksi -> Hasil).
@@ -347,7 +347,6 @@ class LLMEvaluator:
         raw_result = self._chat(prompt, temperature=0.2, response_format="json_object")
         
         try:
-            # --- LAPISAN 1: ROBUST CLEANER ---
             # Buang markdown dan spasi
             clean_result = raw_result.replace("```json", "").replace("```", "").strip()
             
@@ -410,7 +409,7 @@ class LLMEvaluator:
         
         Output: HANYA pertanyaan follow-up.
         """
-        return self._chat(prompt, temperature=0.7)
+        return self._chat(prompt, temperature=0.3)
 
     # =========================================================================
     # SECTION 4: ADAPTIVE DIFFICULTY & STRESS TEST
@@ -427,19 +426,19 @@ class LLMEvaluator:
         elif avg_score >= 6: return "medium"
         else: return "easy"
 
-    def generate_stress_test_question(self, job_role, job_desc, prev_answer=None):
+    def generate_stress_test_question(self, job_role, job_description, last_user_response=None):
         """
         Generate pertanyaan stress test untuk melihat kandidat under pressure.
         """
         # --- LOGIKA SENTIMEN BRIDGING ---
         bridge_instruction = ""
-        if prev_answer:
-             bridge_instruction = f'User menjawab: "{prev_answer}". Beri respons bridging SEBELUM tanya.'
+        if last_user_response:
+             bridge_instruction = f'User menjawab: "{last_user_response}". Beri respons bridging SEBELUM tanya.'
         # --------------------------------
 
         prompt = f"""
         POSISI: {job_role}
-        JOB DESC (Key Challenges): {job_desc[:1000]}
+        JOB DESC (Key Challenges): {job_description[:1000]}
         {bridge_instruction}
         
         TUGAS: Buat SATU pertanyaan "stress test" yang:
@@ -450,7 +449,7 @@ class LLMEvaluator:
         PANJANG: Maksimal 100 kata.
         Output: HANYA pertanyaan stress test.
         """
-        return self._chat(prompt, temperature=0.7)
+        return self._chat(prompt, temperature=0.3)
 
     # =========================================================================
     # SECTION 5: CLOSING, HINTS & USER QUESTIONS
@@ -473,12 +472,12 @@ class LLMEvaluator:
         4. Max 50 kata.
         Output: HANYA closing statement.
         """
-        return self._chat(prompt, temperature=0.8)
+        return self._chat(prompt, temperature=0.5)
 
-    def analyze_closing_intent(self, user_input):
+    def analyze_closing_intent(self, user_message):
         """Intent Detection (ASK vs NO)"""
         prompt = f"""
-        Kalimat: "{user_input}"
+        Kalimat: "{user_message}"
         Tentukan INTENSI: "ASK" (Nanya/Minta Info) atau "NO" (Nolak/Cukup/Makasih).
         Output HANYA satu kata: ASK atau NO.
         """
@@ -508,18 +507,18 @@ class LLMEvaluator:
         
         Output: HANYA jawaban langsung ke kandidat.
         """
-        return self._chat(prompt, temperature=0.7)
+        return self._chat(prompt, temperature=0.5)
 
-    def generate_subtle_hint(self, question, weak_answer):
+    def generate_subtle_hint(self, question, user_response):
         """Generate gentle hint untuk kandidat yang struggling."""
         prompt = f"""
-        Q: "{question}". A: "{weak_answer}".
+        Q: "{question}". A: "{user_response}".
         TUGAS: Beri hint lembut (JANGAN SPOILER JAWABAN).
         Contoh: "Coba pikirkan dari sisi..."
         Max 30 kata.
         Output: HANYA hint.
         """
-        return self._chat(prompt, temperature=0.8)
+        return self._chat(prompt, temperature=0.5)
 
     def detect_need_for_break(self, transcript_length, quality_trend):
         """Detect apakah kandidat butuh break."""
@@ -532,7 +531,7 @@ class LLMEvaluator:
     # =========================================================================
 
     # Menerima scores dan red_flags agar tidak error TypeError
-    def generate_final_report(self, user_name, job_role, job_desc, full_transcript, quality_scores, red_flags):
+    def generate_final_report(self, user_name, job_role, job_description, full_transcript, quality_scores, red_flags):
         """
         REPORT GENERATOR (EDISI COACH UNTUK JOBSEEKER).
         Fokus: Memberikan feedback konstruktif agar user bisa memperbaiki diri.
